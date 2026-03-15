@@ -9,7 +9,7 @@
 ### Security Level: Low 🟡
 * **Payload:** `1' AND (SELECT SUBSTRING(database(),1,1)) = 'd' #`
 * **Result:** The application returns "User ID exists in the database," confirming the first character of the database name is 'd'.
-* **Screenshot:** ![Blind SQLi Low](./blind_low.png)
+* **Screenshot:** ![Blind SQLi Low](./screenshots/blind_low.png)
 * **Explanation of why it worked:** The input is not sanitized, allowing for Boolean-based inference. By asking the database True/False questions (e.g., "does the database name start with 'd'?"), we can leak data one character at a time.
 * **Explanation of why it failed at higher level:** At the Medium level, the application escapes single quotes (`'`), which breaks the SQL string syntax used in this specific payload.
 
