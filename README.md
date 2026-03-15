@@ -721,7 +721,7 @@ document.body.appendChild(s);
 **Why it worked:** Even though the code was obfuscated, the browser still loads the `sha256` hashing library into global memory. By understanding the underlying logic (reversing the phrase and adding the `"XX"` prefix), the calculation was performed manually in the console and the token field updated directly — bypassing the obfuscation entirely.
 
 ---
-## 0. Brute Force
+## 14. Brute Force
 
 The Brute Force module demonstrates how an attacker can gain unauthorized access by systematically guessing passwords using automated tools.
 
