@@ -574,6 +574,7 @@ Message: <script>alert('Stored XSS')</script>
 **Result:** Every time the guestbook page loads, the alert box triggers for any user viewing the page.
 
 **Screenshot:** ![XSS Stored Low](./screenshots/stored_low.png)
+**Screenshot:** ![XSS Stored Low](./screenshots/stored_low2.png)
 
 **Why it worked:** The application takes input from the "Message" field and saves the raw, unencoded string directly into the database. When the page loads, the server pulls this string and renders it into the HTML — the browser interprets the stored `<script>` tags as executable code.
 
