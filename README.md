@@ -437,13 +437,13 @@ This module demonstrates how predictable session identifiers can be exploited fo
 
 ### Security Level: High
 
-**Payload:** Cookie value: `c4ca4238a0b923820dcc509a6f75849b`
+**Payload:** Cookie value: `98f13708210194c475687be6106a3b84`
 
 **Result:** A 32-character hexadecimal string that appears random.
 
 **Screenshot:** ![Weak Session IDs High](./screenshots/wsi_high.png)
 
-**Why it worked:** Cross-referencing the hash against known MD5 values reveals it is simply `md5("1")` — a hash of the same sequential counter used at the Low level. Although the output looks cryptographically strong, the source entropy is still trivially predictable, making the session IDs just as vulnerable to enumeration once the underlying pattern is identified.
+**Why it worked:** Cross-referencing the hash against known MD5 values reveals it is simply `md5("2")` — a hash of the same sequential counter used at the Low level. Although the output looks cryptographically strong, the source entropy is still trivially predictable, making the session IDs just as vulnerable to enumeration once the underlying pattern is identified.
 
 ---
 
@@ -718,3 +718,251 @@ document.body.appendChild(s);
 **Screenshot:** ![JavaScript High](./screenshots/jvs_high.png)
 
 **Why it worked:** Even though the code was obfuscated, the browser still loads the `sha256` hashing library into global memory. By understanding the underlying logic (reversing the phrase and adding the `"XX"` prefix), the calculation was performed manually in the console and the token field updated directly — bypassing the obfuscation entirely.
+
+---
+ 
+## Docker Inspection
+ 
+---
+ 
+### `docker ps`
+ 
+```
+CONTAINER ID   IMAGE                  COMMAND      CREATED      STATUS       PORTS                                     NAMES
+56770fdb9d87   vulnerables/web-dvwa   "/main.sh"   7 days ago   Up 2 hours   0.0.0.0:8080->80/tcp, [::]:8080->80/tcp   dvwa
+```
+ 
+The container is named `dvwa`, built from the `vulnerables/web-dvwa` image, and started via `/main.sh`. Port `8080` on the host maps to port `80` inside the container, which is where Apache listens.
+ 
+---
+ 
+### `docker inspect dvwa` 
+ 
+```json
+"Id": "56770fdb9d87b31ddfbf1f96e68e10b4e18fb37a3f203130a70acd3d0564acbf",
+"Status": "running",
+"Image": "vulnerables/web-dvwa",
+"Entrypoint": ["/main.sh"],
+"PortBindings": { "80/tcp": [{ "HostPort": "8080" }] },
+"NetworkMode": "bridge",
+"IPAddress": "172.17.0.2",
+"Gateway": "172.17.0.1",
+"Platform": "linux",
+"Architecture": "amd64"
+```
+ 
+The container runs on Docker's default `bridge` network, assigned the internal IP `172.17.0.2`. The host machine acts as the gateway at `172.17.0.1` — which is why all access log entries show requests originating from `172.17.0.1`. No volumes are mounted, meaning all data is ephemeral and lost when the container is removed.
+ 
+---
+ 
+### `docker logs dvwa` (summary)
+ 
+```
+[+] Starting mysql...
+Starting MariaDB database server: mysqld.
+[+] Starting apache
+AH00558: apache2: Could not reliably determine the server's fully qualified domain name, using 172.17.0.2.
+Starting Apache httpd web server: apache2.
+```
+ 
+The startup sequence confirms DVWA runs two services inside a single container: MariaDB (MySQL-compatible database) and **Apache 2.4.25** (PHP web server on Debian). The ServerName warning is benign — Apache falls back to the container's IP. Subsequent log entries show all HTTP requests made during testing, including vulnerability exploitation attempts, status codes, and timestamps.
+ 
+---
+ 
+### `docker exec -it dvwa /bin/bash` → `ls /var/www/html`
+ 
+```
+CHANGELOG.md  about.php  dvwa         hackable     instructions.php  php.ini      security.php
+COPYING.txt   config     external     ids_log.php  index.php         phpinfo.php  setup.php
+README.md     docs       favicon.ico  login.php    logout.php        robots.txt   vulnerabilities
+```
+ 
+**Where application files are stored:** All DVWA source files live at `/var/www/html/` inside the container. The `vulnerabilities/` subdirectory contains the individual PHP modules for each exploit category. The `hackable/` directory contains intentionally exposed files and upload targets used during testing (e.g. `/hackable/uploads/` where web shells are deposited).
+ 
+**Backend technology:** DVWA is a PHP application served by Apache 2.4.25 on Debian Linux, backed by a MariaDB database. The `config/` directory contains the database connection settings, and `dvwa/includes/` contains shared PHP libraries.
+ 
+**Docker isolation:** Docker isolates DVWA from the host system through several mechanisms. The container has its own filesystem, process space, and network interface — the application cannot directly access host files or processes. The only deliberate bridge is the port mapping (`8080→80`), which exposes the web server. Since no volumes are mounted, any files written inside the container (such as uploaded web shells) exist only within the container's writable layer and do not persist after removal.
+ 
+---
+ 
+## Security Analysis
+ 
+---
+ 
+**1. Why does SQL Injection succeed at Low security?**
+ 
+At Low security, user input from the `id` parameter is passed directly to the MySQL query as a raw string with no sanitisation, escaping, or parameterisation. The PHP code constructs the query through simple string concatenation, meaning any SQL syntax injected by the user is interpreted and executed by the database as legitimate SQL.
+ 
+---
+ 
+**2. What control prevents it at High security?**
+ 
+The High level moves the input field into a separate session-based popup (`session-input.php`), which writes the value to `$_SESSION` rather than the URL. However the underlying query is still injectable — the session value is concatenated directly into the SQL string. 
+ 
+---
+ 
+**3. Does HTTPS prevent these attacks? Why or why not?**
+ 
+No. HTTPS encrypts the communication channel between the browser and the server, protecting data in transit from interception or tampering by a third party. It does not protect against attacks that originate from the user's own browser  all the vulnerabilities tested here involve the attacker sending malicious input directly to the server. From the server's perspective, a request containing a SQL injection payload sent over HTTPS is indistinguishable from a legitimate one. Input validation and secure coding practices are required to prevent these attacks; encryption alone is not sufficient.
+ 
+---
+ 
+**4. What risks exist if this application is deployed publicly?**
+ 
+Deploying DVWA on a public-facing server would create serious risks. An attacker with network access could extract the entire database including password hashes via SQL injection, gain Remote Code Execution by uploading a PHP web shell through the File Upload module, read sensitive server files like `/etc/passwd` via File Inclusion, hijack active user sessions by predicting Weak Session IDs, and persistently compromise every visitor's browser through Stored XSS. Because DVWA intentionally disables all security controls at lower levels, it effectively functions as an open door into the host system. It must only ever be run in an isolated, non-internet-facing environment such as a local Docker container.
+ 
+---
+ 
+**5. OWASP Top 10:2025 Mapping**
+ 
+| Vulnerability | OWASP Category | Reason |
+|---|---|---|
+| SQL Injection | A05 – Injection | Unsanitised input is passed directly into SQL queries, allowing the attacker to manipulate database logic |
+| SQL Injection (Blind) | A05 – Injection | Same root cause as above; data is inferred through boolean responses or time delays rather than direct output |
+| Command Injection | A05 – Injection | User input is concatenated into a shell command without sanitisation, allowing arbitrary OS commands to execute |
+| XSS (Reflected) | A05 – Injection | Attacker-controlled input is reflected into the HTTP response and executed as JavaScript in the victim's browser |
+| XSS (Stored) | A05 – Injection | Malicious script is persisted to the database and executed in every subsequent visitor's browser |
+| XSS (DOM) | A05 – Injection | Client-side JavaScript writes untrusted URL data directly to the DOM without sanitisation |
+| File Inclusion | A05 – Injection | The `page` parameter is injected with a file path or URI, causing the server to include unintended files |
+| CSRF | A01 – Broken Access Control | The server does not verify that state-changing requests were intentionally issued by the authenticated user |
+| Weak Session IDs | A07 – Authentication Failures | Tokens are generated from predictable values (counters, timestamps, MD5 of counters), making them enumerable |
+| Brute Force | A07 – Authentication Failures | No rate limiting or account lockout allows automated password guessing against the login form |
+| File Upload | A06 – Insecure Design | The application fails to validate file type or content, allowing executable scripts to be uploaded and run on the server |
+| Insecure CAPTCHA | A06 – Insecure Design | CAPTCHA verification relies on client-controlled parameters, making it trivially bypassable without any real challenge |
+| CSP Bypass | A02 – Security Misconfiguration | Hardcoded nonces, overly broad whitelists, and unvalidated JSONP callbacks collectively undermine the CSP policy |
+| JavaScript | A08 – Software or Data Integrity Failures | Security-critical token logic is implemented entirely client-side, allowing the attacker to inspect, reverse-engineer, and forge valid tokens |
+ 
+---
+
+## Bonus: DVWA Behind Nginx Reverse Proxy with HTTPS
+ 
+---
+ 
+### Architecture Overview
+ 
+Now DVWA is no longer exposed directly to the browser. Instead, Nginx acts as a reverse proxy sitting in front of DVWA, terminating TLS and forwarding decrypted traffic internally. Both containers communicate over a private Docker bridge network (dvwa-net), meaning DVWA's port 80 is never exposed to the host.
+ 
+```
+Browser → HTTPS (443) → Nginx → HTTP (80) → DVWA (internal)
+Browser → HTTP  (80)  → Nginx → 301 Redirect → HTTPS
+```
+ 
+---
+ 
+### Setup Files
+ 
+**Directory structure:**
+```
+dvwa-nginx/
+├── docker-compose.yml
+├── nginx/
+│   └── dvwa.conf
+└── ssl/
+    ├── dvwa.crt
+    └── dvwa.key
+```
+ 
+**`nginx/dvwa.conf`:**
+```nginx
+server {
+    listen 80;
+    server_name localhost;
+    return 301 https://$host$request_uri;
+}
+ 
+server {
+    listen 443 ssl;
+    server_name localhost;
+ 
+    ssl_certificate     /etc/nginx/ssl/dvwa.crt;
+    ssl_certificate_key /etc/nginx/ssl/dvwa.key;
+    ssl_protocols       TLSv1.2 TLSv1.3;
+    ssl_ciphers         HIGH:!aNULL:!MD5;
+ 
+    location / {
+        proxy_pass         http://dvwa_app:80;
+        proxy_set_header   Host $host;
+        proxy_set_header   X-Real-IP $remote_addr;
+        proxy_set_header   X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto $scheme;
+    }
+}
+```
+ 
+**`docker-compose.yml`:**
+```yaml
+version: '3'
+ 
+services:
+  dvwa:
+    image: vulnerables/web-dvwa
+    container_name: dvwa_app
+    networks:
+      - dvwa-net
+ 
+  nginx:
+    image: nginx:alpine
+    container_name: dvwa_nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/dvwa.conf:/etc/nginx/conf.d/default.conf
+      - ./ssl:/etc/nginx/ssl
+    depends_on:
+      - dvwa
+    networks:
+      - dvwa-net
+ 
+networks:
+  dvwa-net:
+    driver: bridge
+```
+ 
+---
+ 
+### Self-Signed Certificate Generation
+ 
+```bash
+openssl req -x509 -nodes -days 365 -newkey rsa:2048 -keyout ssl/dvwa.key -out ssl/dvwa.crt -subj "/C=PK/ST=Sindh/L=Karachi/O=HabibUniversity/CN=localhost"
+```
+ 
+This command generates a self-signed X.509 certificate valid for 365 days.
+ 
+**Certificate details confirmed:**
+ 
+![Certificate](./screenshots/certificate.png)
+ 
+---
+ 
+### HTTP vs HTTPS Traffic
+ 
+#### HTTP — Unencrypted with Automatic Redirect
+ 
+When a browser requests `http://localhost`, Nginx immediately responds with a `301 Moved Permanently` redirect to `https://localhost`. The request never reaches DVWA.
+ 
+**Screenshot:** ![HTTP Redirect](./screenshots/http_redirect.png)
+ 
+
+**risk of plain HTTP:** All data transmitted over HTTP is in cleartext. Credentials, session cookies, and form data are fully visible to anyone intercepting network traffic. An attacker on the same network could capture the `PHPSESSID` cookie and hijack the session without needing a password.
+ 
+---
+ 
+#### HTTPS — Encrypted Traffic
+ 
+Once redirected, all subsequent communication occurs over TLS. The browser negotiates an encrypted channel with Nginx using the certificate before any application data is exchanged.
+ 
+**Screenshot:** ![HTTPS Headers](./screenshots/https_headers.png)
+ 
+The request headers visible in DevTools — including the session cookie `PHPSESSID`, `Host`, `User-Agent`, and all other fields — are transmitted **inside the encrypted TLS tunnel**. A network interceptor would see only opaque ciphertext, not the header values shown above.
+ 
+| Property | HTTP | HTTPS |
+|---|---|---|
+| Port | 80 | 443 |
+| Encryption | None | TLS 1.2 / 1.3 |
+| Credentials in transit | Plaintext | Encrypted |
+| Session cookies | Visible to interceptor | Protected |
+| Certificate required | No | Yes |
+| Nginx behaviour | 301 redirect | Proxy to DVWA |
+| Protection against MITM | None | Yes (with trusted cert) |
+ 
