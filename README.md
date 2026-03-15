@@ -437,3 +437,229 @@ step=2&password_new=high123&password_conf=high123&g-recaptcha-response=hidd3n_va
 
 **Why it worked:** The High-level defense relies entirely on **Security through Obscurity**. The server-side code contains a hardcoded backdoor: if the `User-Agent` header is set to `reCAPTCHA` and `g-recaptcha-response` matches the secret value `hidd3n_valu3`, the Google API check is skipped. Since both HTTP headers and request body parameters are fully client-controlled, any tool like Burp Suite can spoof them trivially — obscuring the secret provides no real protection once the source code (or traffic) is inspected.
 
+---
+
+## 9. CSP Bypass
+
+Content Security Policy (CSP) is a browser security mechanism that restricts which scripts a page is allowed to load and execute. This module demonstrates how misconfigured or weakly implemented CSP headers can be bypassed entirely.
+
+---
+
+### 🟡 Security Level: Low
+
+**Payload:**
+```
+http://localhost:8080/vulnerabilities/csp/source/evil.js
+```
+
+*Where `evil.js` contains:*
+```javascript
+alert('CSP Bypass Low')
+```
+
+**Result:** The alert box fired after submitting the self-hosted script URL.
+
+**Screenshot:** ![CSP Bypass Low](./screenshots/csp_low.png)
+
+**Why it worked:** The CSP whitelist allows scripts from `'self'` — meaning any script hosted on the same origin as DVWA is trusted. Since the Docker container has no outbound internet access, a malicious script was planted directly inside the container at `/var/www/html/vulnerabilities/csp/source/evil.js`. Submitting its local URL caused the page to inject `<script src='...evil.js'></script>`, which the browser loaded and executed without any CSP violation.
+
+**Why it fails at higher levels:** The Medium level removes the URL input entirely and instead drops user input directly into the page body, requiring a different injection approach.
+
+---
+
+### 🟢 Security Level: Medium
+
+**Payload:**
+```html
+<script nonce="TmV2ZXIgZ29pbmcgdG8gZ2l2ZSB5b3UgdXA=">alert(1)</script>
+```
+
+**Result:** The alert box fired immediately after submitting the payload.
+
+**Screenshot:** ![CSP Bypass Medium](./screenshots/csp_medium.png)
+
+**Why it worked:** The CSP at this level uses a nonce — a token that must be present on any `<script>` tag for it to execute. However, the nonce is **hardcoded** in the PHP source and never regenerated, making it static and predictable. By extracting the nonce directly from the page source and attaching it to our injected script tag, the browser accepted it as a trusted script and executed it.
+
+**Why it fails at higher levels:** The High level removes inline input injection entirely, relying instead on a JSONP endpoint for dynamic functionality.
+
+---
+
+### 🔴 Security Level: High
+
+**Payload:** *(Executed in the browser console)*
+```javascript
+var s = document.createElement('script');
+s.src = '/vulnerabilities/csp/source/jsonp.php?callback=alert';
+document.body.appendChild(s);
+```
+
+**Result:** The alert box fired with the value `15`.
+
+**Screenshot:** ![CSP Bypass High](./screenshots/csp_high.png)
+
+**Why it worked:** The page makes a legitimate JSONP call to `/vulnerabilities/csp/source/jsonp.php?callback=solveSum` to compute the sum. The CSP only allows `'self'` — but that endpoint is already same-origin. By injecting a new `<script>` tag pointing to the same endpoint with `callback=alert` instead of `callback=solveSum`, the server responds with `alert(15)`, which the browser executes without any CSP violation. The endpoint blindly wraps its response in whatever callback name is supplied, making it trivially exploitable.
+
+## 9. File Inclusion
+
+File Inclusion vulnerabilities occur when an application uses user-supplied input to construct a file path without proper validation, allowing an attacker to include arbitrary files from the server or remote sources.
+
+---
+
+### 🟡 Security Level: Low
+
+**Payload:**
+```
+https://localhost/vulnerabilities/fi/?page=file:///etc/passwd
+```
+
+**Result:** The contents of the server's `/etc/passwd` file were rendered directly on the page, exposing all system user accounts.
+
+**Screenshot:** ![File Inclusion Low](./screenshots/fi_low.png)
+
+**Why it worked:** The application passes the `page` parameter directly to a file inclusion function with no validation whatsoever. By supplying a `file://` URI instead of a relative filename, we instructed the server to read an absolute path on the filesystem and include its contents in the response.
+
+**Why it fails at higher levels:** The Medium level introduces a basic filter that strips `../` and `http://` from the input, attempting to block both path traversal and remote file inclusion.
+
+---
+
+### 🟢 Security Level: Medium
+
+**Payload:**
+```
+https://localhost/vulnerabilities/fi/?page=../../../../etc/passwd
+```
+
+**Result:** The contents of `/etc/passwd` were successfully returned despite the filter.
+
+**Screenshot:** ![File Inclusion Medium](./screenshots/fi_medium.png)
+
+**Why it worked:** The Medium filter strips `../` sequences, but only performs a single pass. By using enough traversal sequences (`../../../../`) to walk up from the current directory to the filesystem root, we reached `/etc/passwd` without triggering the filter — the traversal depth itself was not restricted, only specific patterns were blocked.
+
+**Why it fails at higher levels:** The High level uses a whitelist, only allowing filenames that begin with `file` — which appears to block traversal entirely.
+
+---
+
+### 🔴 Security Level: High
+
+**Payload:**
+```
+https://localhost/vulnerabilities/fi/?page=../../../../../../etc/passwd
+```
+
+**Result:** The contents of `/etc/passwd` were returned using a deeper traversal chain.
+
+**Screenshot:** ![File Inclusion High](./screenshots/fi_high.png)
+
+**Why it worked:** The High level's whitelist checks that the filename starts with `file`, intending to restrict input to known filenames like `file1.php`. However, the `file://` protocol URI also satisfies this check — since it begins with `file`. By combining `file://` with a deep directory traversal sequence, the whitelist check passed while the server still resolved the absolute path to `/etc/passwd`.
+
+---
+
+## 10. File Inclusion (LFI/RFI)
+
+File Inclusion vulnerabilities occur when an application uses user-supplied input to construct a file path without proper validation, allowing an attacker to read sensitive files from the server or execute remote code.
+
+---
+
+### 🟡 Security Level: Low
+
+**Payload:**
+```
+?page=../../../../../../etc/passwd
+```
+
+**Result:** The contents of the server's `/etc/passwd` file were rendered directly on the page, exposing all system user accounts.
+
+**Screenshot:** ![File Inclusion Low](./screenshots/fi_low.png)
+
+**Why it worked:** The `page` parameter is passed directly to PHP's `include()` function without any validation. The `../` sequence traverses up one directory level per pair, allowing us to "climb" out of the web root entirely and reach the filesystem root, where `/etc/passwd` resides.
+
+**Why it fails at higher levels:** The Medium level uses `str_replace()` to strip `../` sequences from the input, attempting to block directory traversal.
+
+---
+
+### 🟢 Security Level: Medium
+
+**Payload:**
+```
+?page=....//....//etc/passwd
+```
+
+**Result:** Successfully read `/etc/passwd` despite the traversal filter.
+
+**Screenshot:** ![File Inclusion Medium](./screenshots/fi_medium.png)
+
+**Why it worked:** The developer used `str_replace()` to delete `../` — but only in a single pass. By nesting the sequence (`....//`), the filter removes the inner `../`, causing the remaining outer characters to collapse and re-form a valid `../`. This is a classic filter evasion technique against non-recursive sanitization.
+
+**Why it fails at higher levels:** The High level implements a whitelist requiring the filename to begin with a specific string, blocking simple traversal payloads.
+
+---
+
+### 🔴 Security Level: High
+
+**Payload:**
+```
+?page=file:///etc/passwd
+```
+
+**Result:** The contents of `/etc/passwd` were returned by abusing the protocol whitelist check.
+
+**Screenshot:** ![File Inclusion High](./screenshots/fi_high.png)
+
+**Why it worked:** The High level's filter requires the input to start with `"file"`, intending to restrict access to known local files like `file1.php`. However, the `file://` URI scheme also satisfies this check since it begins with `file`. By supplying an absolute `file://` path instead of a relative one, we bypassed the whitelist entirely while still forcing the server to read an arbitrary file from the filesystem.
+
+---
+
+## 11. Command Injection
+
+Command Injection occurs when an application passes unsafe user-supplied data to a system shell, allowing an attacker to execute arbitrary operating system commands on the server.
+
+---
+
+### 🟡 Security Level: Low
+
+**Payload:**
+```
+127.0.0.1 ; whoami
+```
+
+**Result:** The server executed the ping command followed by `whoami`, returning the full ping output with `www-data` appended at the bottom.
+
+**Screenshot:** ![Command Injection Low](./screenshots/command_low.png)
+
+**Why it worked:** The application passes the input directly to the underlying shell with no sanitization. The `;` operator is a standard shell separator that allows a second command to execute immediately after the first, regardless of whether the first succeeded or failed.
+
+**Why it fails at higher levels:** The Medium level blacklists both `;` and `&&`, blocking the most common chaining operators.
+
+---
+
+### 🟢 Security Level: Medium
+
+**Payload:**
+```
+127.0.0.1 | whoami
+```
+
+**Result:** Only `www-data` was returned — the pipe discarded the ping output and returned solely the result of `whoami`.
+
+**Screenshot:** ![Command Injection Medium](./screenshots/command_medium.png)
+
+**Why it worked:** The developer blacklisted `;` and `&&` but forgot to include `|`. The pipe operator redirects the output of the first command into the second, effectively executing `whoami` and discarding the ping result entirely.
+
+**Why it fails at higher levels:** The High level expands the blacklist to include `|` as well, blocking this bypass.
+
+---
+
+### 🔴 Security Level: High
+
+**Payload:**
+```
+127.0.0.1 |whoami
+```
+
+**Result:** `www-data` was returned, confirming successful command execution.
+
+**Screenshot:** ![Command Injection High](./screenshots/command_high.png)
+
+**Why it worked:** The High level blacklist strips `| ` — a pipe followed by a space — but fails to account for a pipe with no trailing space. By removing the space between `|` and `whoami`, the payload slips through the filter entirely. This is a classic example of an incomplete blacklist, where a single missing edge case undermines the entire defence.
+
+
