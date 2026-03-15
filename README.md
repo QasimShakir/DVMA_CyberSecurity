@@ -16,15 +16,17 @@
 ### Security Level: Medium 🟢
 * **Payload:** `1 AND IF(ASCII(SUBSTRING(DATABASE(),1,1))=100, SLEEP(5), 0)`
 * **Result:** The server response is delayed by 5 seconds, confirming the first letter is 'd' (ASCII 100).
-* **Screenshot:** ![Blind SQLi Medium](./blind_medium1.png)
+* **Screenshot:** ![Blind SQLi Medium](./screenshots/blind_medium1.png)
 * **Explanation of why it worked:** Since quotes are escaped, we used numerical ASCII values and a time-based attack (`SLEEP`) to confirm the data. If the condition is true, the server hangs for 5 seconds before responding.
 * **Explanation of why it failed at higher level:** The High level uses a separate popup for input and includes a `LIMIT 1` clause in the query, which requires a specific bypass using comment characters to ignore the rest of the query.
 
 ### Security Level: High 🔴
 * **Payload:** `1' AND (SELECT 1 FROM (SELECT(SLEEP(5)))a) #`
 * **Result:** Successful 5-second delay observed via the separate input window.
-* **Screenshot:** ![Blind SQLi High](./blind_high.png)
+* **Screenshot:** ![Blind SQLi High](./screenshots/blind_high.png)
 * **Explanation of why it worked:** The `#` comment character is used to ignore the `LIMIT 1` constraint added by the developer. By using a subquery with `SLEEP`, we can still trigger a time-based delay despite the more restrictive query structure.
+
+---
 
 ## 2. Cross-Site Request Forgery (CSRF)
 
@@ -44,7 +46,7 @@
 
 **Result:** The admin's password was changed to `hehehe` automatically upon opening the malicious HTML file.
 
-**Screenshot:** *(add screenshot here)*
+**Screenshot:** ![CSRF Low](./screenshots/csrf_low.png)
 
 **Why it worked:** The server only checks for a valid session cookie. Since the admin is already logged into DVWA in another tab, the browser automatically attaches the cookie to the forged request, and the server processes it as legitimate.
 
@@ -58,7 +60,7 @@
 
 **Result:** Successfully bypassed the Referer check and changed the password.
 
-**Screenshot:** *(add screenshot here)*
+**Screenshot:** ![CSRF Medium](./screenshots/csrf_medium.png)
 
 **Why it worked:** The developer used a weak substring check that only looks for the word `localhost` anywhere in the `Referer` header. By including `localhost` in the filename, the header became:
 ```
@@ -80,31 +82,33 @@ curl "http://localhost:8080/vulnerabilities/csrf/?password_new=pwned&password_co
 
 **Result:** The terminal returned HTML containing `<pre>Password Changed.</pre>`.
 
-**Screenshot:** *(add screenshot here)*
+**Screenshot:** ![CSRF High](./screenshots/csrf_high.png)
 
 **Why it worked:** While token-based protection is robust against forged external forms, it doesn't defend against an attacker who can read the token directly. By manually extracting `user_token` from the page source and including it alongside a spoofed session cookie in a `curl` request, the server received all the "secrets" it required and processed the change as legitimate.
+
+---
 
 ## 3. JavaScript
 
 ### Security Level: Low 🟡
 * **Payload:** `phrase.value = "success"`; `generate_token()` (Executed in browser console)
 * **Result:** The hidden token was updated to match the hash for the word "success," and the submission was accepted with "Well done!".
-* **Screenshot:** ![JavaScript Low](./jvs_low.png)
+* **Screenshot:** ![JavaScript Low](./screenshots/jvs_low.png)
 * **Explanation of why it worked:** The security logic (ROT13 + MD5) is entirely client-side. By using the browser console, we can manually manipulate variables and force the script to re-calculate a valid token for our new input before the form is submitted.
 * **Explanation of why it failed at higher level:** The Medium level moves the logic into an external `.js` file, which prevents the console from directly seeing the `generate_token` function in the global scope.
 
 ### Security Level: Medium 🟢
 * **Payload:** `phrase.value = "success"`; `do_elsesomething("XX")`
 * **Result:** The "sandwich" token (`XX` + `success` + `XX` reversed) was generated and accepted.
-* **Screenshot:** ![JavaScript Medium](./jvs_medium.png)
+* **Screenshot:** ![JavaScript Medium](./screenshots/jvs_medium.png)
 * **Explanation of why it worked:** By inspecting the "Sources" tab, we located the external `medium.js` file. We reverse-engineered the logic to see that it required a specific function call with the string "XX". Calling this manually in the console synced the hidden token field with our modified input.
 * **Explanation of why it failed at higher level:** The High level uses code obfuscation (packing), making the source code look like gibberish and hiding the logic from simple inspection.
 
 ### Security Level: High 🔴
 * **Payload:** `token.value = sha256("XX" + phrase.value.split("").reverse().join(""))`
 * **Result:** Form submitted successfully after manual token synchronization.
-* **Screenshot:** ![JavaScript High](./jvs_high.png)
-* **Explanation of why it worked:** Even though the code was obfuscated, the browser still loads the `sha256` hashing library into the global memory. By understanding the underlying logic (reversing the phrase and adding the "XX" prefix), we manually performed the calculation in the console and updated the token field ourselves.
+* **Screenshot:** ![JavaScript High](./screenshots/jvs_high.png)
+* **Explanation of why it worked:** Even though the code was obfuscated, the browser still loads the `sha256` hashing library into global memory. By understanding the underlying logic (reversing the phrase and adding the "XX" prefix), we manually performed the calculation in the console and updated the token field ourselves.
 
 ---
 
@@ -123,7 +127,7 @@ Reflected Cross-Site Scripting occurs when an application receives data in an HT
 
 **Result:** A browser alert box appeared with the message `XSS`.
 
-**Screenshot:** ![XSS Reflected Low](./reflected_low.png)
+**Screenshot:** ![XSS Reflected Low](./screenshots/reflected_low.png)
 
 **Why it worked:** The server-side PHP code takes the string from the `name` GET parameter and passes it directly to the browser without any filtering or encoding. The browser sees the `<script>` tags and executes the JavaScript immediately.
 
@@ -141,7 +145,7 @@ Reflected Cross-Site Scripting occurs when an application receives data in an HT
 
 **Result:** The alert box triggered successfully, bypassing the filter.
 
-**Screenshot:** ![XSS Reflected Medium](./reflected_medium.png)
+**Screenshot:** ![XSS Reflected Medium](./screenshots/reflected_medium.png)
 
 **Why it worked:** The developer's filter strips the literal string `<script>`. By nesting the tag (`<scr<script>ipt>`), the filter removes the inner `script`, causing the remaining characters to collapse into a valid `<script>` tag. Alternatively, mixed-case variants like `<sCrIpT>` work because `str_replace()` is case-sensitive.
 
@@ -158,10 +162,9 @@ Reflected Cross-Site Scripting occurs when an application receives data in an HT
 
 **Result:** The alert box triggered via an alternative HTML element.
 
-**Screenshot:** ![XSS Reflected High](./reflected_high.png)
+**Screenshot:** ![XSS Reflected High](./screenshots/reflected_high.png)
 
 **Why it worked:** While the High level successfully blocks all variations of `<script>` via regex, it does not account for other HTML tags capable of executing JavaScript through event handlers. Injecting an `<img>` tag with a broken source (`src=x`) causes the browser to fire the `onerror` event, executing the alert.
-
 
 ---
 
@@ -180,7 +183,7 @@ Message: <script>alert('Stored XSS')</script>
 
 **Result:** Every time the guestbook page loads, the alert box triggers for any user viewing the page.
 
-**Screenshot:** ![XSS Stored Low](./stored_low.png)
+**Screenshot:** ![XSS Stored Low](./screenshots/stored_low.png)
 
 **Why it worked:** The application takes input from the "Message" field and saves the raw, unencoded string directly into the database. When the page loads, the server pulls this string and renders it into the HTML — the browser interprets the stored `<script>` tags as executable code.
 
@@ -198,7 +201,7 @@ Name: <sCrIpT>alert(1)</sCrIpT>
 
 **Result:** The alert box triggered successfully and the script was persisted to the database.
 
-**Screenshot:** ![XSS Stored Medium](./stored_medium.png)
+**Screenshot:** ![XSS Stored Medium](./screenshots/stored_medium.png)
 
 **Why it worked:** The developer's filter checks the "Name" field for the lowercase string `<script>` only. Using mixed case (`<sCrIpT>`) bypasses the case-sensitive `str_replace()` check entirely. Since the UI enforces a character limit client-side via `maxlength`, Burp Suite was used to intercept and modify the request directly, circumventing that restriction before it ever reaches the server.
 
@@ -216,10 +219,11 @@ Name: <img src=x onerror=alert(1)>
 
 **Result:** The alert box triggered for every user who loaded the guestbook page.
 
-**Screenshot:** ![XSS Stored High](./stored_high.png)
+**Screenshot:** ![XSS Stored High](./screenshots/stored_high.png)
 
 **Why it worked:** Similar to the Reflected High bypass, the developer focused exclusively on blocking `<script>` variants but did not sanitize against other HTML elements that support event handlers. By storing an `<img>` tag with a broken `src`, the browser fires the `onerror` event and executes the payload — and because it's stored, every subsequent visitor is affected.
 
+---
 
 ## 4.3 XSS (DOM)
 
@@ -236,7 +240,7 @@ http://localhost:8080/vulnerabilities/xss_d/?default=English<script>alert(1)</sc
 
 **Result:** The browser executed the alert box immediately upon page load.
 
-**Screenshot:** ![XSS DOM Low](./dom_low.png)
+**Screenshot:** ![XSS DOM Low](./screenshots/dom_low.png)
 
 **Why it worked:** The page uses a JavaScript function to read the `default` value directly from the URL's query string, then passes it to `document.write()` to render the default language selection. Since no sanitization is applied, the browser interprets the `<script>` tag embedded in the URL as executable code.
 
@@ -253,7 +257,7 @@ http://localhost:8080/vulnerabilities/xss_d/?default=English</option><img src=x 
 
 **Result:** The alert triggered successfully, bypassing the script-tag filter.
 
-**Screenshot:** ![XSS DOM Medium](./dom_medium.png)
+**Screenshot:** ![XSS DOM Medium](./screenshots/dom_medium.png)
 
 **Why it worked:** The developer's filter only checks for the literal string `<script`. By switching to an `<img>` tag with an `onerror` event handler, the filter is bypassed entirely. The payload first closes the existing `<option>` tag, then injects the malicious image element directly into the DOM.
 
@@ -270,7 +274,7 @@ http://localhost:8080/vulnerabilities/xss_d/?default=English#<script>alert(1)</s
 
 **Result:** The alert triggered by hiding the payload from the server-side filter entirely.
 
-**Screenshot:** ![XSS DOM High](./dom_high.png)
+**Screenshot:** ![XSS DOM High](./screenshots/dom_high.png)
 
 **Why it worked:** The High-level defense is enforced server-side by inspecting URL parameters. However, anything after a fragment identifier (`#`) is **never sent to the server** — it exists only in the browser. By placing the payload after `#`, the server-side whitelist never sees it, yet the client-side JavaScript reads the full URL and writes the malicious script into the page regardless.
 
@@ -291,7 +295,7 @@ The File Upload module demonstrates how an attacker can gain Remote Code Executi
 
 **Result:** The file uploaded successfully. By navigating to the upload path and appending `?cmd=whoami`, the server returned the current username, confirming RCE.
 
-**Screenshot:** *(add screenshot here)*
+**Screenshot:** ![File Upload Low](./screenshots/upload_low.png)
 
 **Why it worked:** The application performs no validation on the uploaded file's extension or content. It accepts any file and moves it to a publicly accessible directory (`/hackable/uploads/`), allowing the PHP interpreter to execute the malicious script when accessed directly via the browser.
 
@@ -305,7 +309,7 @@ The File Upload module demonstrates how an attacker can gain Remote Code Executi
 
 **Result:** Successfully uploaded the PHP shell by spoofing the MIME type.
 
-**Screenshot:** *(add screenshot here)*
+**Screenshot:** ![File Upload Medium](./screenshots/upload_medium.png)
 
 **Why it worked:** The server validates the `Content-Type` header in the HTTP request rather than the file itself. Using Burp Suite, the request was intercepted and the header was changed from `application/x-php` to `image/jpeg`. The server accepted the file because the header matched its whitelist, even though the actual file extension remained `.php`.
 
@@ -319,7 +323,7 @@ The File Upload module demonstrates how an attacker can gain Remote Code Executi
 
 **Result:** The file was accepted by the server as a legitimate image.
 
-**Screenshot:** *(add screenshot here)*
+**Screenshot:** ![File Upload High](./screenshots/upload_high.png)
 
 **Why it worked:** Renaming the file to `exploit.php.jpeg` bypasses the extension whitelist check. Appending the PHP payload to a legitimate image file bypasses the `getimagesize()` content check. While the server stores the file as an image and won't execute it directly, execution is achieved by **chaining** this upload with a File Inclusion vulnerability — forcing the server to parse the `.jpeg` as PHP.
 
@@ -337,7 +341,7 @@ This module demonstrates how predictable session identifiers can be exploited fo
 
 **Result:** Cookie values incremented sequentially: `1`, `2`, `3`, `4`...
 
-**Screenshot:** *(add screenshot here)*
+**Screenshot:** ![Weak Session IDs Low](./screenshots/wsi_low.png)
 
 **Why it worked:** The server uses a simple integer counter that increments by one with every new session. This makes it trivial for an attacker to predict any user's session ID and hijack it by manually setting their cookie to the next value in the sequence.
 
@@ -351,7 +355,7 @@ This module demonstrates how predictable session identifiers can be exploited fo
 
 **Result:** The value matches the Unix timestamp at the exact moment of the request.
 
-**Screenshot:** *(add screenshot here)*
+**Screenshot:** ![Weak Session IDs Medium](./screenshots/wsi_medium.png)
 
 **Why it worked:** While harder to guess than a counter, a timestamp is still predictable. An attacker can brute-force a narrow time window to enumerate valid session IDs belonging to users who authenticated around the same time.
 
@@ -365,7 +369,7 @@ This module demonstrates how predictable session identifiers can be exploited fo
 
 **Result:** A 32-character hexadecimal string that appears random.
 
-**Screenshot:** *(add screenshot here)*
+**Screenshot:** ![Weak Session IDs High](./screenshots/wsi_high.png)
 
 **Why it worked:** Cross-referencing the hash against known MD5 values reveals it is simply `md5("1")` — a hash of the same sequential counter used at the Low level. Although the output looks cryptographically strong, the **source entropy is still trivially predictable**, making the session IDs just as vulnerable to enumeration once the underlying pattern is identified.
 
@@ -388,7 +392,7 @@ The Insecure CAPTCHA module demonstrates how flawed implementation of third-part
 
 **Result:** The password was successfully changed without ever solving the CAPTCHA.
 
-**Screenshot:** ![Captcha Low](./captcha_low.png)
+**Screenshot:** ![Captcha Low](./screenshots/captcha_low.png)
 
 **Why it worked:** The server blindly trusts client-supplied input. It assumes that if `step=2` is present in the request, the user must have already passed CAPTCHA verification in `step=1`. No server-side validation is performed against the Google reCAPTCHA API — the check is purely honour-based.
 
@@ -405,7 +409,7 @@ The Insecure CAPTCHA module demonstrates how flawed implementation of third-part
 
 **Result:** The server accepted the spoofed flag and updated the password.
 
-**Screenshot:** ![Captcha Medium](./captcha_medium.png)
+**Screenshot:** ![Captcha Medium](./screenshots/captcha_medium.png)
 
 **Why it worked:** The developer attempted to patch the Low-level bypass by requiring a specific flag (`passed_captcha=true`) before processing the change. However, since this flag is a **client-side parameter**, any attacker intercepting the request can trivially append it themselves — the "fix" simply moved the trust problem one step further without adding real verification.
 
@@ -429,8 +433,7 @@ step=2&password_new=high123&password_conf=high123&g-recaptcha-response=hidd3n_va
 
 **Result:** The password was successfully changed by triggering the server's internal bypass logic.
 
-**Screenshot:** ![Captcha High](./captcha_high.png)
+**Screenshot:** ![Captcha High](./screenshots/captcha_high.png)
 
 **Why it worked:** The High-level defense relies entirely on **Security through Obscurity**. The server-side code contains a hardcoded backdoor: if the `User-Agent` header is set to `reCAPTCHA` and `g-recaptcha-response` matches the secret value `hidd3n_valu3`, the Google API check is skipped. Since both HTTP headers and request body parameters are fully client-controlled, any tool like Burp Suite can spoof them trivially — obscuring the secret provides no real protection once the source code (or traffic) is inspected.
 
-> **Defense in Depth:** A correctly implemented CAPTCHA must perform **server-side verification** by sending the `g-recaptcha-response` token directly to the Google reCAPTCHA API and confirming a successful response before proceeding — never trusting any client-supplied flag or header as proof of completion.
