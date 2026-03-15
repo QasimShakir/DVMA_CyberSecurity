@@ -591,7 +591,7 @@ Name: <sCrIpT>alert(1)</sCrIpT>
 *(Injected via Burp Suite to bypass the HTML `maxlength` attribute)*
 
 **Result:** The alert box triggered successfully and the script was persisted to the database.
-
+**Screenshot:** ![XSS Stored Medium](./screenshots/stored_medium2.png)
 **Screenshot:** ![XSS Stored Medium](./screenshots/stored_medium.png)
 
 **Why it worked:** The developer's filter checks the "Name" field for the lowercase string `<script>` only. Using mixed case (`<sCrIpT>`) bypasses the case-sensitive `str_replace()` check entirely. Since the UI enforces a character limit client-side via `maxlength`, Burp Suite was used to intercept and modify the request directly, circumventing that restriction before it ever reaches the server.
