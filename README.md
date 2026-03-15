@@ -720,6 +720,101 @@ document.body.appendChild(s);
 **Why it worked:** Even though the code was obfuscated, the browser still loads the `sha256` hashing library into global memory. By understanding the underlying logic (reversing the phrase and adding the `"XX"` prefix), the calculation was performed manually in the console and the token field updated directly — bypassing the obfuscation entirely.
 
 ---
+## 0. Brute Force
+
+The Brute Force module demonstrates how an attacker can gain unauthorized access by systematically guessing passwords using automated tools.
+
+---
+
+### Security Level: Low
+
+**Tool:** Burp Suite Intruder (Sniper attack)
+
+**Exploit Process:**
+1. Navigated to the Brute Force page and submitted a login attempt with `admin` and a dummy password
+2. Intercepted the request in Burp Suite and sent it to Intruder
+3. Cleared all payload markers and set the `password` parameter as the injection point
+4. Loaded a wordlist of common passwords and launched the Sniper attack
+
+**Payload list used:**
+```
+password, admin, 123456, letmein, abc123, password123, qwerty, monkey, dragon, master
+```
+
+**Screenshot — Intruder setup:** ![Brute Force Low Setup](./screenshots/brute_low1.png)
+
+**Screenshot — Intruder results:** ![Brute Force Low Results](./screenshots/brute_low2.png)
+
+**Result:** Request 1 (`password`) returned a response length of **4740** — noticeably longer than all others at ~4702-4703. Clicking that request confirmed the response body contained "Welcome to the password protected area admin", identifying the correct password.
+
+**Screenshot — Successful login:** ![Brute Force Low Login](./screenshots/brute_low3.png)
+
+**Why it worked:** The Low level applies no rate limiting, account lockout, or delay between login attempts. The server processes every request immediately, making it trivial for Burp Intruder to cycle through a wordlist and identify the correct password by comparing response lengths.
+
+**Why it fails at higher levels:** The Medium level introduces a `sleep(2)` delay after each failed attempt, significantly slowing down automated attacks. The High level adds an Anti-CSRF token that must be extracted from each page response and included in the next request, breaking standard Intruder attacks.
+
+---
+
+### Security Level: Medium
+
+**Tool:** Burp Suite Intruder (same approach as Low)
+
+**Exploit Process:** Identical to the Low level — the same Sniper attack with the same wordlist was used. The only observable difference was the attack taking significantly longer to complete due to the server-side `sleep(2)` delay introduced at this level.
+
+**Result:** `password` was again identified as the correct credential through the longer response length.
+
+**Why it worked:** The `sleep(2)` delay slows the attack but does not prevent it. Given enough time, every password in the wordlist is still tried and the correct one is still identifiable. There is no lockout mechanism to terminate the attempt after a threshold of failures.
+
+**Why it fails at higher levels:** The High level requires a valid `user_token` with every request. Since this token changes after each page load, a simple Intruder attack fails because the token becomes stale after the first request.
+
+---
+
+### Security Level: High
+
+**Tool:** Custom Python script using the `requests` library
+
+**Exploit Process:**
+The script fetches the Brute Force page before each attempt, extracts the current `user_token` from the HTML using regex, then submits it alongside the login credentials. The session cookie (`PHPSESSID`) was copied from DevTools and hardcoded into the script to maintain the authenticated session
+
+**Script:**
+```python
+import requests
+import re
+
+url = "http://localhost:8080/vulnerabilities/brute/"
+cookies = {
+    "PHPSESSID": "2q4c3rafk9cirs4dkl6o4sr792",
+    "security": "high"
+}
+
+passwords = ["password", "admin", "123456", "letmein", "abc123"]
+
+for password in passwords:
+    r = requests.get(url, cookies=cookies)
+    token = re.search(r"user_token.*?value='(.*?)'", r.text).group(1)
+
+    params = {
+        "username": "admin",
+        "password": password,
+        "Login": "Login",
+        "user_token": token
+    }
+    r = requests.get(url, params=params, cookies=cookies)
+
+    if "Welcome to the password protected area" in r.text:
+        print(f"[+] Password found: {password}")
+        break
+    else:
+        print(f"[-] Failed: {password}")
+```
+
+**Result:** The terminal returned `[+] Password found: password` after the first attempt.
+
+**Screenshot:** ![Brute Force High](./screenshots/brute_high.png)
+
+**Why it worked:** The Anti-CSRF token is designed to prevent automated tools from submitting multiple requests without first loading the page. By fetching a fresh token before every login attempt, the script satisfies the token requirement and effectively automates what a human would do manually — load the page, read the token, submit the form.
+
+---
  
 ## Docker Inspection
  
@@ -834,11 +929,11 @@ Deploying DVWA on a public-facing server would create serious risks. An attacker
  
 ---
 
-## Bonus: DVWA Behind Nginx Reverse Proxy with HTTPS
+## Bonus
  
 ---
  
-### Architecture Overview
+### Nginx
  
 Now DVWA is no longer exposed directly to the browser. Instead, Nginx acts as a reverse proxy sitting in front of DVWA, terminating TLS and forwarding decrypted traffic internally. Both containers communicate over a private Docker bridge network (dvwa-net), meaning DVWA's port 80 is never exposed to the host.
  
